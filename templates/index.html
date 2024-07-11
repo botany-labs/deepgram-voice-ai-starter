@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <body>
+    <link
+      href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
+      rel="stylesheet"
+    />
+    <script src="https://unpkg.com/pcm-player"></script>
+    <script>
+      let websocket = null;
+
+      // AUDIO INPUT
+
+      async function start() {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+          if (!MediaRecorder.isTypeSupported("audio/webm"))
+            return alert("Browser not supported");
+
+          const mediaRecorder = new MediaRecorder(stream, {
+            mimeType: "audio/webm",
+          });
+
+          // websocket = new WebSocket("ws://localhost:8000/listen");
+          let wsProtocol =
+            window.location.protocol === "https:" ? "wss://" : "ws://";
+          let wsHost = window.location.host;
+          let wsUrl = wsProtocol + wsHost + "/listen";
+          websocket = new WebSocket(wsUrl);
+
+          websocket.onopen = () => {
+            document.querySelector("#status").textContent = "Status: Connected";
+            console.log({ event: "onopen" });
+            mediaRecorder.addEventListener("dataavailable", async (event) => {
+              if (event.data.size > 0 && websocket.readyState == 1) {
+                websocket.send(event.data);
+              }
+            });
+            mediaRecorder.start(250);
+          };
+
+          websocket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data["type"] == "audio") {
+              const audioChunk = base64ToArrayBuffer(data.b64buffer);
+              player.feed(audioChunk);
+            }
+            if (data["type"] == "logs") {
+              const logsDiv = document.getElementById("logs");
+              const logEntry = document.createElement("p");
+              logEntry.textContent = data.message;
+              logsDiv.appendChild(logEntry);
+              logsDiv.scrollTop = logsDiv.scrollHeight; // Auto scroll to bottom
+            }
+          };
+
+          websocket.onclose = () => {
+            console.log({ event: "onclose" });
+          };
+
+          websocket.onerror = (error) => {
+            console.log({ event: "onerror", error });
+          };
+        });
+      }
+
+      // AUDIO PLAYBACK
+
+      var player = new PCMPlayer({
+        inputCodec: "Int16",
+        channels: 1,
+        sampleRate: 24000,
+        flushTime: 200,
+      });
+      player.volume(2);
+
+      function base64ToArrayBuffer(base64) {
+        const binaryString = window.atob(base64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return bytes;
+      }
+    </script>
+
+    <div
+      class="flex flex-col items-center justify-center h-screen gap-2 w-full"
+    >
+      <div class="w-full max-w-md flex flex-col gap-2">
+        <button
+          id="startButton"
+          class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded place-self-end"
+          onclick="start()"
+        >
+          Start Call
+        </button>
+        <p id="status">Status: Not Connected</p>
+        <b class="text-left text-lg">Logs:</b>
+        <div
+          id="logs"
+          class="border border-gray-300 rounded-md p-4 bg-gray-100 overflow-y-auto h-96 break-words"
+        ></div>
+      </div>
+    </div>
+  </body>
+</html>
